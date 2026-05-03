@@ -8,11 +8,14 @@ import time
 from app.core.logger import get_logger
 import datetime
 
+from app.services.task import send_booking_email
+from app.core.deps import get_current_user
+
 router = APIRouter()
 logger = get_logger(__name__)
 
 @router.post("/book/{seat_id}")
-def book_seat(seat_id: int, db: Session = Depends(get_db)):
+def book_seat(seat_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     try:
         logger.info(f"Incoming booking request seat_id={seat_id}")
         logger.info(f"START seat_id={seat_id} time={datetime.datetime.now()}")
@@ -32,10 +35,7 @@ def book_seat(seat_id: int, db: Session = Depends(get_db)):
         # Mark seat as booked BEFORE committing
         seat.status = "booked"
 
-        logger.info("Processing booking... (simulated delay)")
-        time.sleep(5)
-
-        booking = Booking(user_id=1, seat_id=seat_id, status="confirmed")
+        booking = Booking(user_id=current_user.id, seat_id=seat_id, status="confirmed")
 
         db.add(booking)
         logger.info("Before commit (still holding lock)")
@@ -43,6 +43,12 @@ def book_seat(seat_id: int, db: Session = Depends(get_db)):
         db.refresh(booking)
 
         logger.info(f"Booking successful booking_id={booking.id}")
+
+        logger.info("Triggering Celery task: send_booking_email")
+        # Trigger async task to send email notification
+        task = send_booking_email.delay(user_id=booking.user_id, seat_id=booking.seat_id)
+
+        logger.info(f"Task sent to queue task_id={task.id}")
 
         return {
             "status": "success",
